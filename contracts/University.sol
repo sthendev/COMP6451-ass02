@@ -1,7 +1,123 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.4.22 <0.9.0;
+pragma solidity  ^0.8.0;
 
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
+/// @title University with roles
 contract University {
-  constructor() public {
+  using ECDSA for bytes32;
+  // stores the address of the university's chief operating officer
+  // is also the "owner" of the contract
+  address payable public chief;
+
+  // university fee per unit of credit in wei
+  uint public feePerUOC;
+
+  // roles of system users
+  enum Role { Unknown, Student, Admin }
+
+  // store the role of all users
+  // Unknown by default because of how solidity works with enums
+  mapping (address => Role) roles;
+
+  constructor() {
+    chief = payable(msg.sender);
+  }
+  
+  /// modifier to confirm that it is chief calling the function
+  modifier onlyChief() {
+    require(
+      msg.sender == chief,
+      'Only the chief operating officer may call this'
+    );
+    _;
+  }
+  
+  /// modfier to confirm that it is a administrator calling the function
+  modifier onlyAdmin() {
+    require(
+      roles[msg.sender] == Role.Admin,
+      'Only university administrators may call this'
+    );
+    _;
+  }
+  
+  /// modifier to confirm that only users that don't already have a role can call the function
+  modifier hasNoRole() {
+    require(
+      roles[msg.sender] == Role.Unknown,
+      'Caller already is assigned to a role'
+    );
+    _;
+  }
+
+  event Fee(uint fee);
+  event NewAdmin(address addr);
+  event RemoveAdmin(address addr);
+  event NewStudent(address addr);
+  event RemoveStudent(address addr);
+  
+  /// Allows the chief operating officer to change the fee per UOC
+  function setFee(uint _feePerUOC) public onlyChief {
+    feePerUOC = _feePerUOC;
+    emit Fee(feePerUOC);
+  }
+  
+  /// Allows the chief operating officer to withdraw money from the contract
+  function withdraw() public onlyChief {
+    chief.transfer(address(this).balance); 
+  }
+  
+  /// Allows the chief operating officer to assign a new chief operating officer
+  function transferChief(address addr) public onlyChief {
+    chief = payable(addr);
+  }
+
+  /// Allows the chief operating officer to grant administrator role to addresses
+  function addAdmins(address[] memory addresses) public onlyChief {
+    for (uint i = 0; i < addresses.length; i++) {
+      if (roles[addresses[i]] == Role.Unknown) {
+        roles[addresses[i]] = Role.Admin;
+        emit NewAdmin(addresses[i]);
+      }
+    }
+  }
+
+  /// Allows the chief operating officer to remove the administrator role to addresses
+  function removeAdmin(address addr) public onlyChief {
+    require(
+      roles[addr] == Role.Admin,
+      'Cannot remove adminstrator role from address that is not an administrator'
+    );
+    roles[addr] = Role.Unknown;
+    emit RemoveAdmin(addr);
+  }
+  
+  /// Returns the role of an address
+  function getRole(address addr) public view returns (string memory) {
+    if (addr == chief) {
+      return 'Chief';
+    } else if (roles[addr] == Role.Admin) {
+      return 'Admin';
+    } else if (roles[addr] == Role.Student) {
+      return 'Student';
+    } else {
+      return 'Unknown';
+    }
+  }
+
+  /// Allows a user to join the univerity as a student by providing a message
+  /// signed by a university administrator
+  function enroll(bytes32 hash, bytes memory signature) public hasNoRole {
+    require (
+      keccak256(abi.encodePacked(address(this), msg.sender)) == hash,
+      'Message provided is invalid for this contract'
+    );
+    require(
+      roles[hash.toEthSignedMessageHash().recover(signature)] == Role.Admin,
+      'Message is not signed by a university administrator'
+    );
+    roles[msg.sender] = Role.Student;
+    emit NewStudent(msg.sender);
   }
 }
