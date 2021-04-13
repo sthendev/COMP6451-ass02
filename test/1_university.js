@@ -1,18 +1,5 @@
+const { ether2wei, fixSignature } = require('./helpers.js');
 const University = artifacts.require("University");
-
-// Taken from @openzeppelin/test/helpers/sign.js to make web3.eth.sign compatible
-// with ECDSA.recover from openzeppelin when using truffle suite
-function fixSignature (signature) {
-  // in geth its always 27/28, in ganache its 0/1. Change to 27/28 to prevent
-  // signature malleability if version is 0/1
-  // see https://github.com/ethereum/go-ethereum/blob/v1.8.23/internal/ethapi/api.go#L465
-  let v = parseInt(signature.slice(130, 132), 16);
-  if (v < 27) {
-    v += 27;
-  }
-  const vHex = v.toString(16);
-  return signature.slice(0, 130) + vHex;
-} 
 
 contract("University", accounts => {
     it("should assign the creator of the contract to be the chief operating officer intially", async () => {
@@ -31,14 +18,14 @@ contract("University", accounts => {
         const uni = await University.deployed();
         // Invalid access
         try {
-            await uni.setFee('1000000000000000000', {from: accounts[1]});
+            await uni.setFee(ether2wei(1), {from: accounts[1]});
             assert.fail('calling setFee from non-chief did not raise exception');
         } catch {}
         // Valid access
         try {
-            await uni.setFee('1000000000000000000', {from: accounts[0]});
+            await uni.setFee(ether2wei(1), {from: accounts[0]});
             const fee = await uni.feePerUOC();
-            assert.equal(fee, '1000000000000000000', 'fee was not set correctly');
+            assert.equal(fee, ether2wei(1), 'fee was not set correctly');
         } catch (err) {
             console.log(err.message);
             assert.fail('setting fee with chief operating officer threw exception');
