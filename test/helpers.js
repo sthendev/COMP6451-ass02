@@ -1,9 +1,5 @@
-function ether2wei(amount) {
-  return `${amount}000000000000000000`
-}
-
-function ether2weiMinusOne(amount) {
-  return `${amount - 1}999999999999999999`
+function ether(amount, addition = 0) {
+  return (BigInt(amount * 10**18) + BigInt(addition)).toString();
 }
 
 // Taken from @openzeppelin/test/helpers/sign.js to make web3.eth.sign compatible
@@ -33,10 +29,19 @@ async function assertRole(account, role, uni, account_idx) {
   assert.equal(account_role, role, `account ${account_idx} is not a ${role}`);
 }
 
+async function assertRevert(testFunc, message) {
+  try {
+    await testFunc();
+    throw null;
+  } catch (err) {
+    assert.notEqual(err, null, message);
+  }
+}
+
 module.exports = {
-  ether2wei: ether2wei,
-  ether2weiMinusOne: ether2weiMinusOne,
+  ether: ether,
   fixSignature: fixSignature,
   addStudents: addStudents,
-  assertRole: assertRole
+  assertRole: assertRole,
+  assertRevert: assertRevert
 }

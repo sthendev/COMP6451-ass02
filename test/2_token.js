@@ -1,13 +1,11 @@
-const { ether2wei, ether2weiMinusOne, addStudents, assertRole } = require('./helpers.js');
+const { ether, addStudents, assertRole, assertRevert } = require('./helpers.js');
 const University = artifacts.require("University");
 
 contract("AdmissionToken", accounts => {
   let uni = null;
 
-  before( async () => {
+  it('should not allow students to pay fees before the contract is initialized', async () => {
     uni = await University.deployed();
-    // maximum 18 UOC, 1 Ether fee per UOC
-    await uni.init(18, ether2wei(1), {from: accounts[0]});
     // accounts 1 and 2 will be administrators
     await uni.addAdmins([accounts[1], accounts[2]], {from: accounts[0]});
     // accounts 3, 4, 5, 6, 7 will be students
@@ -27,6 +25,12 @@ contract("AdmissionToken", accounts => {
       web3.eth.sign,
       uni
     );
+    // test if student is allowed to pay fees before init called by chief
+    await assertRevert(async () => {
+      await uni.payFees(12, {from: accounts[3], value: ether(12)});
+    }, 'student was able to pay fees before initialization');
+    // maximum 18 UOC, 1 Ether fee per UOC
+    await uni.init(18, ether(1), {from: accounts[0]});
   });
 
   it('should be initialized', async () => {
@@ -35,7 +39,7 @@ contract("AdmissionToken", accounts => {
     let maxUOC = await uni.maxUOC();
     await assert.equal(maxUOC, 18, 'maxUOC was not set correctly');
     let fee = await uni.feePerUOC();
-    await assert.equal(fee, ether2wei(1), 'fee was not set correctly');
+    await assert.equal(fee, ether(1), 'fee was not set correctly');
     // Check admins
     await assertRole(accounts[1], 'Admin', uni, 1);
     await assertRole(accounts[2], 'Admin', uni, 2);
@@ -50,25 +54,26 @@ contract("AdmissionToken", accounts => {
     await assertRole(accounts[9], 'Unknown', uni, 9);
   });
 
-  it('should allow student to pay fees for n units of credit an be assigned tokens', async () => {
+  it('should allow student to pay fees for n units of credit and be assigned tokens', async () => {
     // Invalid Access
-    try {
-      await uni.payFees(18, {from: accounts[8], value: ether2wei(18)});
-      assert.fail('calling payFees from Unknown address did not throw exception');
-    } catch {}
+    await assertRevert(async () => {
+      await uni.payFees(18, {from: accounts[8], value: ether(18)});
+    }, 'calling payFees from Unknown address did not throw exception');
     // Too many UOC requested
-    try {
-      await uni.payFees(19, {from: accounts[3], value: ether2wei(18)});
-      assert.fail('calling payFees with too many UOC did not throw exception');
-    } catch {}
+    await assertRevert(async () => {
+      await uni.payFees(19, {from: accounts[3], value: ether(18)});
+    }, 'calling payFees with too many UOC did not throw exception')
     // Not enough ether provided
-    try {
-      await uni.payFees(12, {from: accounts[3], value: ether2weiMinusOne(12)});
-      assert.fail('calling payFees with not enough ether did not throw exception');
-    } catch {}
+    await assertRevert(async () => {
+      await uni.payFees(12, {from: accounts[3], value: ether(12, -1)});
+    }, 'calling payFees with not enough ether did not throw exception')
+    //try {
+      //await uni.payFees(12, {from: accounts[3], value: ether(12, -1)});
+      //assert.fail('calling payFees with not enough ether did not throw exception');
+    //} catch {}
     // Valid payment of fees for 12 units of credit
     try {
-      await uni.payFees(12, {from: accounts[3], value: ether2wei(12)});
+      await uni.payFees(12, {from: accounts[3], value: ether(12)});
       let paidUOC = await uni.getPaidUOC(accounts[3]);
       assert.equal(paidUOC, 12, 'student paidUOC was not updated correctly');
       let tokenBalance = await uni.getBalance(accounts[3]);
@@ -78,13 +83,12 @@ contract("AdmissionToken", accounts => {
       assert.fail('valid payment for 12 UOC threw exception');
     }
     // Invalid repayment for 7 UOC making total for student greater than 18 UOC maximum
-    try {
-      await uni.payFees(7, {from: accounts[3], value: ether2wei(7)});
-      assert.fail('calling payFees again to exceed max UOC did not throw exception');
-    } catch {}
+    await assertRevert(async () => {
+      await uni.payFees(7, {from: accounts[3], value: ether(7)});
+    }, 'calling payFees again to exceed max UOC did not throw exception');
     // Valid repayment for 6 UOC bringing total paid equal to 18 UOC maximum
     try {
-      await uni.payFees(6, {from: accounts[3], value: ether2wei(6)});
+      await uni.payFees(6, {from: accounts[3], value: ether(6)});
       let paidUOC = await uni.getPaidUOC(accounts[3]);
       assert.equal(paidUOC, 18, 'student paidUOC was not updated correctly');
       let tokenBalance = await uni.getBalance(accounts[3]);
@@ -93,5 +97,5 @@ contract("AdmissionToken", accounts => {
       console.log(err);
       assert.fail('valid repayment for 6 UOC threw exception');
     }
-  })
+  });
 })
