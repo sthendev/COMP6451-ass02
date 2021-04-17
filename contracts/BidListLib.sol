@@ -18,17 +18,21 @@ library BidListLib {
   // ##### VIEWS #####
 
   /// Checks if a bidder has already placed a bid in this list
-  function inList(BidList storage self, address bidder) internal view returns (bool) {
+  function inList(BidList storage self, address bidder) public view returns (bool) {
     return self.bids[bidder].inList;
   }
 
   /// Allow users to retrieve the bid that a particular user made in this list
-  function getBid(BidList storage self, address addr) internal view returns(uint) {
+  function getBid(BidList storage self, address addr) public view returns(uint) {
+    require(
+      self.bids[addr].inList,
+      'the address provided has not made a bid in this list'
+    );
     return self.bids[addr].amount;
   }
 
   /// Return an ordered list of bids
-  function getBids(BidList storage self) internal view returns (address[] memory, uint[] memory) {
+  function getBids(BidList storage self) public view returns (address[] memory, uint[] memory) {
     address[] memory bidders = new address[](self.length);
     uint[] memory bids = new uint[](self.length);
     address curr = self.head;
@@ -44,7 +48,7 @@ library BidListLib {
 
   // ##### STATE CHANGING ######
 
-  function insert(BidList storage self, address bidder, uint amount) internal {
+  function insert(BidList storage self, address bidder, uint amount) public {
     require(
       inList(self, bidder) == false,
       'Bidder has already made a bid for this'
@@ -67,24 +71,34 @@ library BidListLib {
     self.length++;
   }
 
-  function remove(BidList storage self, address bidder) internal {
+  function remove(BidList storage self, address bidder) public {
     if (self.head == address(0)) return;
-    address curr = self.head;
-    address next = self.bids[curr].next;
-    while (next != address(0) && next != bidder) {
-      curr = next;
-      next = self.bids[curr].next;
+    bool removed = false;
+    if (self.head == bidder) {
+      self.head = self.bids[self.head].next;
+      removed = true;
     }
-    if (next != address(0)) {
-      self.bids[curr].next = self.bids[next].next;
-      self.bids[next].amount = 0;
-      self.bids[next].next = address(0);
-      self.bids[next].inList = false;
+    else {
+      address curr = self.head;
+      address next = self.bids[curr].next;
+      while (next != address(0) && next != bidder) {
+        curr = next;
+        next = self.bids[curr].next;
+      }
+      if (next != address(0)) {
+        self.bids[curr].next = self.bids[next].next;
+        removed = true;
+      }
+    }
+    if (removed) {
+      self.bids[bidder].amount = 0;
+      self.bids[bidder].next = address(0);
+      self.bids[bidder].inList = false;
       self.length--;
     }
   }
 
-  function change(BidList storage self, address bidder, uint amount) internal {
+  function change(BidList storage self, address bidder, uint amount) public {
     require(
       inList(self, bidder) == true,
       'Cannot change bid that does not exist'

@@ -3,6 +3,7 @@ const University = artifacts .require("University");
 
 contract("BidList", accounts => {
   let uni = null;
+  let biddingEnd = 0;
 
   before(async () => {
     uni = await University.deployed();
@@ -73,6 +74,25 @@ contract("BidList", accounts => {
     assert.equal(await uni.getBalance(accounts[7]), 1200, 'admission tokens not assigned correctly');
   });
 
+  it('should allow administrators to start a bidding round', async () => {
+    // Trying to make bids before bidding is open
+    await assertRevert(async () => {
+      await uni.makeBid(web3.utils.fromAscii('COMP1511'), 500, {from: accounts[8]});
+    }, 'should not have allowed making bids before the bidding was opened');
+    // Trying to start bidding from non admin account
+    await assertRevert(async () => {
+      await uni.startBiddingRound(10, {from: accounts[8]});
+    }, 'should not have allowed non-admin to start bidding')
+    // Valid starting of bidding with 5 second round time
+    await uni.startBiddingRound(10, {from: accounts[1]});
+    biddingEnd = (await uni.getBiddingEndTime()).toNumber();
+    assert.isAtLeast(biddingEnd, Math.floor(Date.now() / 1000), 'bidding round end is not in the future');
+    // Trying to start another bidding round while one is active
+    await assertRevert(async () => {
+      await uni.startBiddingRound(10, {from: accounts[2]});
+    }, 'should not allow calling of startBiddingRound while one is active');
+  });
+
   it('should allow students to bid on courses', async () => {
     // Not student
     await assertRevert(async () => {
@@ -139,6 +159,10 @@ contract("BidList", accounts => {
   });
 
   it('should allow users to change their bid', async () => {
+    // shouldn't be able to chage bid to amount greater than tokens available excluding current bid
+    await assertRevert(async () => {
+      await uni.changeBid(web3.utils.fromAscii('COMP6451'), 1101, {from: accounts[3]});
+    }, 'allowed two many tokens to be bid via changeBid');
     await uni.changeBid(web3.utils.fromAscii('COMP6451'), 1100, {from: accounts[3]});
     let ret = await uni.getBids(web3.utils.fromAscii('COMP6451'));
     let addresses = ret[0];
@@ -146,5 +170,59 @@ contract("BidList", accounts => {
     assert.sameOrderedMembers(addresses, [accounts[3], accounts[5], accounts[4]],
       'bidders are not in the right order');
     assert.sameOrderedMembers(bids, [1100, 1050, 800]);
+  });
+
+  it('should allow users to remove their bid', async () => {
+    // Remove a bid
+    await uni.removeBid(web3.utils.fromAscii('COMP6451'), {from: accounts[3]});
+    await assertRevert(async () => {
+      await uni.getBid(web3.utils.fromAscii('COMP6451'), accounts[3]);
+    }, 'bid was not removed');
+    // Still should allow them to remake the same bid
+    await uni.makeBid(web3.utils.fromAscii('COMP6451'), 1100, {from: accounts[3]});
+    let bid = await uni.getBid(web3.utils.fromAscii('COMP6451'), accounts[3]);
+    assert.equal(bid, 1100, 'bid was not added correctly');
+  });
+
+  it('should assign students within the quota to courses and refund other students on bidding round end', async () => {
+    // It should not allow admin to close bidding before the round end time
+    assert.isBelow(Math.floor(Date.now() / 1000), biddingEnd, 'cannot run next test while bidding end time has not been reached');
+    // Trying to end round before end time has been reached
+    await assertRevert(async () => {
+      await uni.closeBidding({from: accounts[1]});
+    }, 'calling closeBidding before round end time should revert');
+    // Wait until bidding round ends
+    while (Math.floor(Date.now() / 1000) <= biddingEnd) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    // Check that we are above the bidding end time
+    assert.isAbove(Math.floor(Date.now() / 1000), (await uni.getBiddingEndTime()).toNumber(), 'cannot run next test without being past bidding end time');
+    // Try bidding after bidding round end
+    await assertRevert(async () => {
+      await uni.makeBid(web3.utils.fromAscii('COMP3151'), 500, {from: accounts[4]});
+    }, 'should not be able to make bid after round end time');
+    // Non-admin tries to close bidding
+    await assertRevert(async () => {
+      await uni.closeBidding({from: accounts[8]});
+    }, 'calling closeBidding from non-admin should throw exception');
+    // Admin closes bidding for the round
+    await uni.closeBidding({from: accounts[1]});
+    // Check students with highest bids within quota have been accepted to courses
+    let comp1511Accepted = await uni.getAcceptedStudents(web3.utils.fromAscii('COMP1511'));
+    let comp6451Accepted = await uni.getAcceptedStudents(web3.utils.fromAscii('COMP6451'));
+    let comp3151Accepted = await uni.getAcceptedStudents(web3.utils.fromAscii('COMP3151'));
+    let comp1521Accepted = await uni.getAcceptedStudents(web3.utils.fromAscii('COMP1521'));
+    let comp9517Accepted = await uni.getAcceptedStudents(web3.utils.fromAscii('COMP9517'));
+    assert.sameMembers(comp1511Accepted, [accounts[3]], 'incorrect students accepte 1511');
+    assert.sameMembers(comp6451Accepted, [accounts[3], accounts[5]], 'incorrect students accepted 6451');
+    assert.sameMembers(comp3151Accepted, [accounts[3]], 'incorrect students accepted 3151');
+    assert.sameMembers(comp1521Accepted, [], 'incorrect students accepted 1521');
+    assert.sameMembers(comp9517Accepted, [], 'incorrect students accepted 9517');
+    assert.equal((await uni.getBalance(accounts[3])).toNumber(), 0, 'incorrect balance account 3');
+    // Account 4's bid was refunded
+    assert.equal((await uni.getBalance(accounts[4])).toNumber(), 1800, 'incorrect balance account 4');
+    assert.equal((await uni.getBalance(accounts[5])).toNumber(), 750, 'incorrect balance accounts 5');
+    assert.equal((await uni.getBalance(accounts[6])).toNumber(), 1200, 'incorrect balance accounts 6');
+    assert.equal((await uni.getBalance(accounts[7])).toNumber(), 1200, 'incorrect balance accounts 7');
   });
 });

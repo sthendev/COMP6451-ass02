@@ -3,7 +3,7 @@ pragma solidity  ^0.8.0;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./AdmissionTokenLib.sol";
-import "./BidListLib.sol";
+import "./BiddableCoursesLib.sol";
 
 /// @title University with roles
 contract University {
@@ -13,7 +13,7 @@ contract University {
 
   using ECDSA for bytes32;
   using AdmissionTokenLib for AdmissionTokenLib.AdmissionToken;
-  using BidListLib for BidListLib.BidList;
+  using BiddableCoursesLib for BiddableCoursesLib.BiddableCourses;
 
   // ---------------------------------------------------------------------------
   // Contract State
@@ -44,6 +44,7 @@ contract University {
   // store structs to represent students
   struct Student {
     uint8 paidUOC;
+    bytes8[] acceptedCourses;
     bytes8[] bids;
   }
   mapping (address => Student) students;
@@ -51,16 +52,8 @@ contract University {
   // struct that handles the admission token balances of students
   AdmissionTokenLib.AdmissionToken tokens;
 
-  // store structs to represent courses
-  struct Course {
-    bool created;
-    uint quota;
-    uint8 uoc;
-    address[] enrolled;
-    BidListLib.BidList bids;
-  }
-  mapping (bytes8 => Course) courseDetails;
-  bytes8[] courses;
+  // struct that handles the courses and bidding
+  BiddableCoursesLib.BiddableCourses courses;
 
   // ---------------------------------------------------------------------------
   // Constructor
@@ -78,7 +71,7 @@ contract University {
   modifier isInitialized() {
     require (
       initialized == true,
-      'Cannot call this before the contract is initialized'
+      'contract not initialized'
     );
     _;
   }
@@ -87,7 +80,7 @@ contract University {
   modifier onlyChief() {
     require(
       msg.sender == chief,
-      'Only the chief operating officer may call this'
+      'not chief operating officer'
     );
     _;
   }
@@ -96,7 +89,16 @@ contract University {
   modifier onlyAdmin() {
     require(
       roles[msg.sender] == Role.Admin,
-      'Only university administrators may call this'
+      'not administrator'
+    );
+    _;
+  }
+
+  /// modfier to confirm that it is originall an admin making transaction
+  modifier originAdmin() {
+    require(
+      roles[tx.origin] == Role.Admin,
+      'not administrator'
     );
     _;
   }
@@ -105,7 +107,7 @@ contract University {
   modifier onlyStudent() {
     require(
       roles[msg.sender] == Role.Student,
-      'Only admitted students may call this'
+      'not student'
     );
     _;
   }
@@ -114,7 +116,7 @@ contract University {
   modifier hasNoRole() {
     require(
       roles[msg.sender] == Role.Unknown,
-      'Caller already is assigned to a role'
+      'already has role'
     );
     _;
   }
@@ -123,7 +125,7 @@ contract University {
   modifier isStudent(address addr) {
     require(
       roles[addr] == Role.Student,
-      'Address provided does not belong to a student'
+      'not student'
     );
     _;
   }
@@ -131,17 +133,16 @@ contract University {
   /// modifier to confirm that the course requested exists
   modifier isCourse(bytes8 code) {
     require(
-      courseDetails[code].created == true,
-      'Requested course code is not recognized'
+      courses.isCourse(code),
+      'no such course'
     );
     _;
   }
 
-  /// modifier to confirm that the course
-  modifier isBidder(bytes8 code, address addr) {
+  modifier biddingIsOpen() {
     require(
-      courseDetails[code].bids.inList(addr),
-      'Address called with is had not made a bid for the requested course'
+      courses.isBiddingOpen() && block.timestamp <= courses.getBiddingEndTime(),
+      'bidding closed'
     );
     _;
   }
@@ -172,7 +173,12 @@ contract University {
 
   /// Allows user to view the courses available in the session
   function getCourses() public view returns (bytes8[] memory) {
-    return courses;
+    return courses.getCourses();
+  }
+
+  /// Allows a user to view the accepted students in a course
+  function getAcceptedStudents(bytes8 code) public view returns (address[] memory) {
+    return courses.getAccepted(code);
   }
 
   // ##### STATE CHANGING #####
@@ -207,7 +213,7 @@ contract University {
   function removeAdmin(address addr) public onlyChief {
     require(
       roles[addr] == Role.Admin,
-      'Cannot remove adminstrator role from address that is not an administrator'
+      'not administrator'
     );
     roles[addr] = Role.Unknown;
   }
@@ -217,32 +223,17 @@ contract University {
   function enroll(bytes32 hash, bytes memory signature) public hasNoRole {
     require (
       keccak256(abi.encodePacked(address(this), msg.sender)) == hash,
-      'Message provided is invalid for this contract'
+      'invalid hash'
     );
     require(
       roles[hash.toEthSignedMessageHash().recover(signature)] == Role.Admin,
-      'Message is not signed by a university administrator'
+      'invalid signature'
     );
     roles[msg.sender] = Role.Student;
   }
 
   function createCourse(bytes8 code, uint quota, uint8 uoc) public onlyAdmin {
-    require(
-      courseDetails[code].created == false,
-      'A course already exists with that course code'
-    );
-    require(
-      quota > 0,
-      'A course must allow at least 1 student'
-    );
-    require(
-      uoc > 0,
-      'A course must be worth at least one unit of credit'
-    );
-    courseDetails[code].quota = quota;
-    courseDetails[code].uoc = uoc;
-    courseDetails[code].created = true;
-    courses.push(code);
+    courses.createCourse(code, quota, uoc);
   }
 
   // ---------------------------------------------------------------------------
@@ -256,7 +247,7 @@ contract University {
     uint tokensHeldInBids = 0;
     for (uint i = 0; i < students[addr].bids.length; i++) {
       bytes8 courseCode = students[addr].bids[i];
-      tokensHeldInBids += courseDetails[courseCode].bids.getBid(addr);
+      tokensHeldInBids += courses.getBid(courseCode, addr);
     }
     return tokens.getBalance(addr) - tokensHeldInBids;
   }
@@ -267,14 +258,33 @@ contract University {
   function payFees(uint8 numUOC) public payable isInitialized onlyStudent {
     require (
       numUOC + students[msg.sender].paidUOC <= maxUOC,
-      'Requested units of credit would cause you to exceed the maximum units of credit for this term'
+      'exceeding max uoc'
     );
     require (
       msg.value >= uint(feePerUOC) * numUOC,
-      'Not enough Ether to cover the requested units of credit'
+      'too little ether'
     );
     tokens.mint(msg.sender, uint(numUOC) * 100);
     students[msg.sender].paidUOC += numUOC;
+  }
+
+  /// Allows student to receive tokens from another student but must provide 1 tenth of the value of the tokens as a transfer fee
+  /// To ensure security the receiver must provide a signed message containing 
+  function receiveTransfer(bytes32 hash, bytes memory signature, uint amount, uint nonce) public hasNoRole {
+    require(
+      keccak256(abi.encodePacked(address(this), msg.sender, amount, nonce)) == hash,
+      'invalid hash'
+    );
+    address signer = hash.toEthSignedMessageHash().recover(signature);
+    require(
+      roles[signer] == Role.Student,
+      'invalid signature'
+    );
+    require(
+      amount <= getBalance(signer),
+      'not enough tokens'
+    );
+    tokens.transfer(signer, msg.sender);
   }
 
   // ---------------------------------------------------------------------------
@@ -286,42 +296,88 @@ contract University {
   // Allows user to get bid made by a user for a course
   function getBid(bytes8 code, address addr) public view isStudent(addr) isCourse(code) returns (uint) {
     require(
-      courseDetails[code].bids.inList(addr),
-      'No bid from that address found on the course specified'
+      courses.bidExists(code, addr),
+      'no bid'
     );
-    return courseDetails[code].bids.getBid(addr);
+    return courses.getBid(code, addr);
   }
 
   function getBids(bytes8 code) public view isCourse(code) returns (address[] memory, uint[] memory) {
-    return courseDetails[code].bids.getBids();
+    return courses.getBids(code);
   }
 
+  function getBiddingEndTime() public view returns (uint) {
+    return courses.getBiddingEndTime();
+  }
   // ##### STATE CHANGING #####
 
-  function makeBid(bytes8 code, uint amount) public isInitialized onlyStudent isCourse(code) {
+  function startBiddingRound(uint roundTimeInSeconds) public isInitialized onlyAdmin {
+    require (
+      !courses.isBiddingOpen(),
+      'bidding open already'
+    );
+    courses.openBidding(roundTimeInSeconds);
+  }
+
+  function makeBid(bytes8 code, uint amount) public biddingIsOpen onlyStudent isCourse(code) {
     require (
       amount <= getBalance(msg.sender),
-      'Not enough admission tokens to make the requested bid'
+      'insufficient tokens'
     );
-    uint8 existingBidsUOC = 0;
+    uint8 existingUOC = 0;
+    for (uint i = 0; i < students[msg.sender].acceptedCourses.length; i++) {
+      bytes8 _code = students[msg.sender].acceptedCourses[i];
+      existingUOC += courses.getUOC(_code);
+    }
     for (uint i = 0; i < students[msg.sender].bids.length; i++) {
       bytes8 _code = students[msg.sender].bids[i];
-      existingBidsUOC += courseDetails[_code].uoc;
+      existingUOC += courses.getUOC(_code);
     }
     require (
-      existingBidsUOC + courseDetails[code].uoc <= maxUOC,
-      'The requested course would put you over the maximum UOC allowed for this session'
+      existingUOC + courses.getUOC(code) <= students[msg.sender].paidUOC,
+      'exceeding paid uoc'
     );
-    courseDetails[code].bids.insert(msg.sender, amount);
+    courses.bid(code, msg.sender, amount);
     students[msg.sender].bids.push(code);
   }
 
-  function changeBid(bytes8 code, uint amount) public isInitialized onlyStudent isCourse(code) {
-    uint originalBid = courseDetails[code].bids.getBid(msg.sender);
+  function changeBid(bytes8 code, uint amount) public biddingIsOpen onlyStudent isCourse(code) {
+    uint originalBid = courses.getBid(code, msg.sender);
     require(
       amount <= getBalance(msg.sender) + originalBid,
-      'Not enough admission tokens to make the requested bid'
+      'insufficient tokens'
     );
-    courseDetails[code].bids.change(msg.sender, amount);
+    courses.changeBid(code, msg.sender, amount);
+  }
+
+
+  function removeBid(bytes8 code) public biddingIsOpen onlyStudent isCourse(code) {
+    courses.removeBid(code, msg.sender);
+    bytes8[] storage bids = students[msg.sender].bids;
+    for (uint i = 0; i < bids.length; i++) {
+      if (bids[i] == code) {
+        bids[i] = bids[bids.length - 1];
+        bids.pop();
+        break;
+      }
+    }
+  }
+
+  function handleAccepted(bytes8 courseCode, address student, uint bidAmount) external originAdmin {
+    students[student].acceptedCourses.push(courseCode);
+    tokens.burn(student, bidAmount);
+    delete students[student].bids;
+  }
+
+  function handleRejected(address student) external originAdmin {
+    delete students[student].bids;
+  }
+
+  function closeBidding() public onlyAdmin() {
+    require(
+      block.timestamp > courses.getBiddingEndTime(),
+      'called too early'
+    );
+    courses.closeBidding(this.handleAccepted, this.handleRejected);
   }
 }
