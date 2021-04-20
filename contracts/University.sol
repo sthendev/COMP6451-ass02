@@ -365,19 +365,28 @@ contract University {
   }
 
   function makeBid(bytes8 code, uint amount) public biddingIsOpen onlyStudent isCourse(code) {
+    require(
+      prerequisitesComplete(code, msg.sender),
+      'prerequisites not met'
+    );
     performBid(code, amount);
+  }
+
+  function getPrerequisites(bytes8 code) public view returns(bytes8[] memory, uint) {
+    return courses.getPrerequisites(code);
   }
 
   function prerequisitesComplete(bytes8 code, address addr) internal view returns(bool) {
     (bytes8[] memory prereqs, uint length) = courses.getPrerequisites(code);
     for (uint i = 0; i < length; i++) {
-      if (!sturec.hasPassed(prereqs[i], addr))
+      if (!sturec.hasPassed(prereqs[i], addr)) {
         return false;
+      }
     }
     return true;
   }
 
-  function makeBid(
+  function makeBidWithSignature(
     bytes8 code,
     uint amount,
     bytes32 hash,

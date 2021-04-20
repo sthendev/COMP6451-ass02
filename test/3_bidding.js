@@ -86,7 +86,7 @@ contract("BidList", accounts => {
     await assertRevert(async () => {
       await uni.startBiddingRound(10, {from: accounts[8]});
     }, 'should not have allowed non-admin to start bidding')
-    // Valid starting of bidding with 5 second round time
+    // Valid starting of bidding with 10 second round time
     await uni.startBiddingRound(10, {from: accounts[1]});
     biddingEnd = (await uni.getBiddingEndTime()).toNumber();
     assert.isAtLeast(biddingEnd, Math.floor(Date.now() / 1000), 'bidding round end is not in the future');
