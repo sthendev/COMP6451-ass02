@@ -13,6 +13,8 @@ library BiddableCoursesLib {
     uint quota;
     uint8 uoc;
     address[] accepted;
+    address lecturer;
+    bytes8[] prereqs;
     BidListLib.BidList bids;
   }
   
@@ -86,13 +88,29 @@ library BiddableCoursesLib {
     return self.courseDetails[code].accepted;
   }
 
+  function getLecturer(
+    BiddableCourses storage self,
+    bytes8 code
+  ) public view returns(address) {
+    return self.courseDetails[code].lecturer;
+  }
+
+  function getPrerequisites(
+    BiddableCourses storage self,
+    bytes8 code
+  ) public view returns(bytes8[] memory, uint length) {
+    return (self.courseDetails[code].prereqs, self.courseDetails[code].prereqs.length);
+  }
+
   // ##### STATE CHANGING #####
   
   function createCourse(
     BiddableCourses storage self,
     bytes8 code,
     uint quota,
-    uint8 uoc
+    uint8 uoc,
+    address lecturer,
+    bytes8[] memory prereqs
   ) public {
     require(
       self.courseDetails[code].created == false,
@@ -109,6 +127,8 @@ library BiddableCoursesLib {
     self.courseDetails[code].quota = quota;
     self.courseDetails[code].uoc = uoc;
     self.courseDetails[code].created = true;
+    self.courseDetails[code].lecturer = lecturer;
+    self.courseDetails[code].prereqs = prereqs;
     self.courses.push(code);
   }
 

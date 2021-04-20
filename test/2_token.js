@@ -1,4 +1,4 @@
-const { ether, addStudents, assertRole, assertRevert } = require('./helpers.js');
+const { ether, addStudents, assertRole, assertRevert, fixSignature } = require('./helpers.js');
 const University = artifacts.require("University");
 
 contract("AdmissionToken", accounts => {
@@ -67,10 +67,6 @@ contract("AdmissionToken", accounts => {
     await assertRevert(async () => {
       await uni.payFees(12, {from: accounts[3], value: ether(12, -1)});
     }, 'calling payFees with not enough ether did not throw exception')
-    //try {
-      //await uni.payFees(12, {from: accounts[3], value: ether(12, -1)});
-      //assert.fail('calling payFees with not enough ether did not throw exception');
-    //} catch {}
     // Valid payment of fees for 12 units of credit
     try {
       await uni.payFees(12, {from: accounts[3], value: ether(12)});
@@ -98,4 +94,42 @@ contract("AdmissionToken", accounts => {
       assert.fail('valid repayment for 6 UOC threw exception');
     }
   });
-})
+
+  it('should allow students to transfer funds between each other', async () => {
+    const buyer = accounts[4];
+    const seller = accounts[3];
+    const initialBuyerTokens = (await uni.getBalance(buyer)).toNumber();
+    const initialSellerTokens = (await uni.getBalance(seller)).toNumber();
+    const initialContractBalance = await web3.eth.getBalance(uni.address)
+    assert.isAtLeast(initialSellerTokens, 200, 'seller does not have enough tokens');
+    // not student calling function
+    await assertRevert(async () => {
+      let hashedMessage = web3.utils.soliditySha3(uni.address, accounts[8], 200, 1);
+      let signature = fixSignature(await web3.eth.sign(hashedMessage, seller));
+      await uni.receiveTransfer(hashedMessage, signature, 200, 1, {from: accounts[8], value: ether(2)});
+    }, 'calling from non-student should throw exception') 
+    // insufficient transaction fee
+    await assertRevert(async () => {
+      let hashedMessage = web3.utils.soliditySha3(uni.address, buyer, 200, 1);
+      let signature = fixSignature(await web3.eth.sign(hashedMessage, seller));
+      await uni.receiveTransfer(hashedMessage, signature, 200, 1, {from: buyer, value: '199999999999999999'});
+    }, 'calling without sufficient transaction fee should throw exception');
+    // should fail if seller hasn't signed the message
+    await assertRevert(async () => {
+      let hashedMessage = web3.utils.soliditySha3(uni.address, buyer, 200, 1);
+      let signature = fixSignature(await web3.eth.sign(hashedMessage, accounts[8]));
+      await uni.receiveTransfer(hashedMessage, signature, 200, 1, {from: buyer, value: '200000000000000000'});
+    }, 'should fail if non-student signs the message')
+    let hashedMessage = web3.utils.soliditySha3(uni.address, buyer, 200, 1);
+    let signature = fixSignature(await web3.eth.sign(hashedMessage, seller));
+    await uni.receiveTransfer(hashedMessage, signature, 200, 1, {from: buyer, value: '200000000000000000'});
+    assert.equal(await uni.getBalance(buyer), initialBuyerTokens + 200, 'buyer did not receive correct amount of tokens');
+    assert.equal(await uni.getBalance(seller), initialSellerTokens - 200, 'tokens were not removed from seller');
+    assert.equal((await web3.eth.getBalance(uni.address)) - initialContractBalance, '200000000000000000', 'contract did not receive transaction fee');
+    await assertRevert(async () => {
+      let hashedMessage = web3.utils.soliditySha3(uni.address, buyer, 200, 1);
+      let signature = fixSignature(await web3.eth.sign(hashedMessage, accounts[8]));
+      await uni.receiveTransfer(hashedMessage, signature, 200, 1, {from: buyer, value: '200000000000000000'});
+    }, 'should fail if nonce re-used')
+  });
+});

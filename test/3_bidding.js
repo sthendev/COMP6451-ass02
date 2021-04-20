@@ -11,12 +11,14 @@ contract("BidList", accounts => {
     await uni.init(18, ether(1), {from: accounts[0]});
     // accounts 1 and 2 will be administrators
     await uni.addAdmins([accounts[1], accounts[2]], {from: accounts[0]});
+    // account 9 will be a lecturer
+    await uni.addLecturer(accounts[9], {from: accounts[1]});
     // create 5 courses
-    await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, {from: accounts[1]});
-    await uni.createCourse(web3.utils.fromAscii('COMP1511'), 4, 6, {from: accounts[1]});
-    await uni.createCourse(web3.utils.fromAscii('COMP1521'), 4, 6, {from: accounts[1]});
-    await uni.createCourse(web3.utils.fromAscii('COMP9517'), 3, 6, {from: accounts[2]});
-    await uni.createCourse(web3.utils.fromAscii('COMP3151'), 2, 6, {from: accounts[2]});
+    await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, accounts[9], [], {from: accounts[1]});
+    await uni.createCourse(web3.utils.fromAscii('COMP1511'), 4, 6, accounts[9], [], {from: accounts[1]});
+    await uni.createCourse(web3.utils.fromAscii('COMP1521'), 4, 6, accounts[9], [], {from: accounts[1]});
+    await uni.createCourse(web3.utils.fromAscii('COMP9517'), 3, 6, accounts[9], [], {from: accounts[2]});
+    await uni.createCourse(web3.utils.fromAscii('COMP3151'), 2, 6, accounts[9], [], {from: accounts[2]});
     // accounts 3, 4, 5, 6, 7 will be students
     // accounts 3, 4, 5 will be admitted by account 1
     await addStudents(
@@ -53,6 +55,8 @@ contract("BidList", accounts => {
     // Check admins
     await assertRole(accounts[1], 'Admin', uni, 1);
     await assertRole(accounts[2], 'Admin', uni, 2);
+    // Check Lecturer
+    await assertRole(accounts[9], 'Lecturer', uni, 9)
     // Check courses
     let courses = (await uni.getCourses()).map(el => web3.utils.hexToAscii(el));
     assert.sameMembers(courses, ['COMP6451', 'COMP1511', 'COMP1521', 'COMP9517', 'COMP3151'],
@@ -65,7 +69,6 @@ contract("BidList", accounts => {
     await assertRole(accounts[7], 'Student', uni, 7);
     // Check unknowns
     await assertRole(accounts[8], 'Unknown', uni, 8);
-    await assertRole(accounts[9], 'Unknown', uni, 9);
     // Check admission token balances
     assert.equal(await uni.getBalance(accounts[3]), 1800, 'admission tokens not assigned correctly');
     assert.equal(await uni.getBalance(accounts[4]), 1800, 'admission tokens not assigned correctly');
@@ -192,7 +195,7 @@ contract("BidList", accounts => {
       await uni.closeBidding({from: accounts[1]});
     }, 'calling closeBidding before round end time should revert');
     // Wait until bidding round ends
-    while (Math.floor(Date.now() / 1000) <= biddingEnd) {
+    while (Math.floor(Date.now() / 1000) <= biddingEnd + 5) {
       await new Promise(r => setTimeout(r, 1000));
     }
     // Check that we are above the bidding end time

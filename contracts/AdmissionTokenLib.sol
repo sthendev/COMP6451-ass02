@@ -29,4 +29,19 @@ library AdmissionTokenLib {
     );
     self.balances[from] -= amount;
   }
+  
+
+  /// Allow tokens to be transferred from one user to another
+  function transfer(
+    AdmissionToken storage self,
+    address from,
+    address to,
+    uint amount) public {
+    require(
+      amount <= self.balances[from],
+      'not enough tokens'
+    );
+    self.balances[from] -= amount;
+    self.balances[to] += amount;
+  }
 }

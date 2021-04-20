@@ -140,25 +140,49 @@ contract("University", accounts => {
     }, 'calling enroll as a student should have failed');
   });
 
+  it("should allow an adminstrator to grant the Lecturer role to an address", async () => {
+    const uni = await University.deployed();
+    const adminstrator = accounts[1];
+    const notAdministrator = accounts[3];
+    const potentialLecturer = accounts[9];
+    assert.equal(await uni.getRole(potentialLecturer), 'Unknown', 'already has role');
+    // Invalid Access
+    await assertRevert(async () => {
+      await uni.addLecturer(potentialLecturer, {from: notAdministrator});
+    }, 'calling with non-admin should throw exception');
+    // Already has role
+    await assertRevert(async () => {
+      await uni.addLecturer(administrator, {from: adminstrator});
+    }, 'calling on address with role should throw exception');
+    // Valid call
+    await uni.addLecturer(potentialLecturer, {from: adminstrator});
+    assert.equal(await uni.getRole(potentialLecturer), 'Lecturer', 'role not assigned');
+  });
+
   it("should allow an administrator to create a course", async () => {
     const uni = await University.deployed();
     const administrator = accounts[1];
     const notAdministrator = accounts[3];
+    const lecturer = accounts[9];
     // Invalid Access
     await assertRevert(async () => {
-      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, {from: notAdministrator});
+      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, lecturer, [], {from: notAdministrator});
     }, 'calling createCourse from non-admin did not throw exception');
     // Trying to create course with 0 UOC
     await assertRevert(async () => {
-      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 0, {from: administrator});
+      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 0, lecturer, [], {from: administrator});
     }, 'trying to create course with 0 UOC did not throw exception');
     // Trying to create course with 0 quota
     await assertRevert(async () => {
-      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 0, 6, {from: administrator});
+      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 0, 6, lecturer, [], {from: administrator});
     }, 'trying to create course with 0 quota did not throw exception');
+    // Trying to add course with invalid lecturer
+    await assertRevert(async () => {
+      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, accounts[8], [], {from: administrator});
+    }, 'trying to create course with invalid lecturer');
     // Valid course creation
     try {
-      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, {from: administrator});
+      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 2, 6, lecturer, [], {from: administrator});
       let courses = (await uni.getCourses()).map(el => web3.utils.hexToAscii(el));
       assert.sameMembers(courses, ['COMP6451'], 'course was not added correctly');
     } catch (err) {
@@ -167,7 +191,7 @@ contract("University", accounts => {
     }
     // Trying to add same course twice
     await assertRevert(async () => {
-      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 1, 4, {from: administrator});
+      await uni.createCourse(web3.utils.fromAscii('COMP6451'), 1, 4, lecturer, [], {from: administrator});
     }, 'trying to create same twice should have thrown exception');
   });
 });

@@ -4,6 +4,7 @@ pragma solidity  ^0.8.0;
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./AdmissionTokenLib.sol";
 import "./BiddableCoursesLib.sol";
+import "./StudentRecord.sol";
 
 /// @title University with roles
 contract University {
@@ -23,6 +24,9 @@ contract University {
   // is also the "owner" of the contract
   address payable public chief;
 
+  // stores information about previous courses and passes
+  StudentRecord sturec;
+
   // full course load
   // limited to a maximum of 255 units of credit
   uint8 public maxUOC;
@@ -35,7 +39,7 @@ contract University {
   bool public initialized;
 
   // roles of system users
-  enum Role { Unknown, Student, Admin }
+  enum Role { Unknown, Student, Admin, Lecturer }
 
   // store the role of all users
   // Unknown by default because of how solidity works with enums
@@ -55,12 +59,16 @@ contract University {
   // struct that handles the courses and bidding
   BiddableCoursesLib.BiddableCourses courses;
 
+  // struct to store used nonces for adresses
+  mapping(address => mapping(uint => bool)) nonces;
+
   // ---------------------------------------------------------------------------
   // Constructor
   // ---------------------------------------------------------------------------
 
-  constructor() {
+  constructor(StudentRecord _sturec) {
     chief = payable(msg.sender);
+    sturec = _sturec;
   }
 
   // ---------------------------------------------------------------------------
@@ -161,6 +169,8 @@ contract University {
       return 'Admin';
     } else if (roles[addr] == Role.Student) {
       return 'Student';
+    } else if (roles[addr] == Role.Lecturer) {
+      return 'Lecturer';
     } else {
       return 'Unknown';
     }
@@ -217,11 +227,21 @@ contract University {
     );
     roles[addr] = Role.Unknown;
   }
+  
+
+  /// Allows admin to add Lecturer to the system
+  function addLecturer(address addr) public onlyAdmin {
+    require(
+      roles[addr] == Role.Unknown,
+      'already has role'
+    );
+    roles[addr] = Role.Lecturer;
+  }
 
   /// Allows a user to join the univerity as a student by providing a message
   /// signed by a university administrator
   function enroll(bytes32 hash, bytes memory signature) public hasNoRole {
-    require (
+    require(
       keccak256(abi.encodePacked(address(this), msg.sender)) == hash,
       'invalid hash'
     );
@@ -232,8 +252,18 @@ contract University {
     roles[msg.sender] = Role.Student;
   }
 
-  function createCourse(bytes8 code, uint quota, uint8 uoc) public onlyAdmin {
-    courses.createCourse(code, quota, uoc);
+  function createCourse(
+    bytes8 code,
+    uint quota,
+    uint8 uoc,
+    address lecturer,
+    bytes8[] memory prereqs
+  ) public onlyAdmin {
+    require(
+      roles[lecturer] == Role.Lecturer,
+      'address not lecturer'
+    );
+    courses.createCourse(code, quota, uoc, lecturer, prereqs);
   }
 
   // ---------------------------------------------------------------------------
@@ -270,9 +300,27 @@ contract University {
 
   /// Allows student to receive tokens from another student but must provide 1 tenth of the value of the tokens as a transfer fee
   /// To ensure security the receiver must provide a signed message containing 
-  function receiveTransfer(bytes32 hash, bytes memory signature, uint amount, uint nonce) public hasNoRole {
+  function receiveTransfer(
+    bytes32 hash,
+    bytes memory signature,
+    uint amount,
+    uint nonce
+  ) public payable onlyStudent {
     require(
-      keccak256(abi.encodePacked(address(this), msg.sender, amount, nonce)) == hash,
+      nonces[msg.sender][nonce] == false,
+      'nonce has already been used'
+    );
+    require(
+      msg.value >= (amount * (feePerUOC / 100)) / 10,
+      'insufficient transaction  fee'
+    );
+    require(
+      keccak256(abi.encodePacked(
+        address(this),
+        msg.sender,
+        amount,
+        nonce
+      )) == hash,
       'invalid hash'
     );
     address signer = hash.toEthSignedMessageHash().recover(signature);
@@ -280,11 +328,8 @@ contract University {
       roles[signer] == Role.Student,
       'invalid signature'
     );
-    require(
-      amount <= getBalance(signer),
-      'not enough tokens'
-    );
-    tokens.transfer(signer, msg.sender);
+    tokens.transfer(signer, msg.sender, amount);
+    nonces[msg.sender][nonce] == true;
   }
 
   // ---------------------------------------------------------------------------
@@ -320,6 +365,41 @@ contract University {
   }
 
   function makeBid(bytes8 code, uint amount) public biddingIsOpen onlyStudent isCourse(code) {
+    performBid(code, amount);
+  }
+
+  function prerequisitesComplete(bytes8 code, address addr) internal view returns(bool) {
+    (bytes8[] memory prereqs, uint length) = courses.getPrerequisites(code);
+    for (uint i = 0; i < length; i++) {
+      if (!sturec.hasPassed(prereqs[i], addr))
+        return false;
+    }
+    return true;
+  }
+
+  function makeBid(
+    bytes8 code,
+    uint amount,
+    bytes32 hash,
+    bytes memory signature
+  ) public biddingIsOpen onlyStudent isCourse(code) {
+    require(
+      keccak256(abi.encodePacked(
+        address(this),
+        msg.sender,
+        code
+      )) == hash,
+      'invalid hash'
+    );
+    address signer = hash.toEthSignedMessageHash().recover(signature);
+    require(
+      signer == courses.getLecturer(code),
+      'invalid signature'
+    );
+    performBid(code, amount);
+  }
+
+  function performBid(bytes8 code, uint amount) internal {
     require (
       amount <= getBalance(msg.sender),
       'insufficient tokens'
@@ -340,6 +420,7 @@ contract University {
     courses.bid(code, msg.sender, amount);
     students[msg.sender].bids.push(code);
   }
+
 
   function changeBid(bytes8 code, uint amount) public biddingIsOpen onlyStudent isCourse(code) {
     uint originalBid = courses.getBid(code, msg.sender);
