@@ -132,6 +132,18 @@ library BiddableCoursesLib {
     self.courses.push(code);
   }
 
+  function setQuota(
+    BiddableCourses storage self,
+    bytes8 code,
+    uint quota
+  ) public {
+    require(
+      quota >= self.courseDetails[code].accepted.length,
+      'Cannot reduce less than students accepted already'
+    );
+    self.courseDetails[code].quota = quota;
+  }
+
   function openBidding(
     BiddableCourses storage self,
     uint roundTimeInSeconds

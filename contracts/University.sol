@@ -252,6 +252,7 @@ contract University {
     roles[msg.sender] = Role.Student;
   }
 
+  /// Allows an admin to create a course
   function createCourse(
     bytes8 code,
     uint quota,
@@ -266,11 +267,20 @@ contract University {
     courses.createCourse(code, quota, uoc, lecturer, prereqs);
   }
 
+  /// Allows an admin to change a course quota, bidding must not be open currently
+  function setQuota(bytes8 code, uint quota) public onlyAdmin {
+    require(
+      !courses.isBiddingOpen(),
+      'bidding active'
+    );
+    courses.setQuota(code, quota);
+  }
+
   // ---------------------------------------------------------------------------
   // Token functions
   // ---------------------------------------------------------------------------
 
-  // ##### VIEWS #####
+  // ##### VIEWS #####;
 
   /// Allows user to get the token balance of a student
   function getBalance(address addr) public view isStudent(addr) returns (uint) {
@@ -463,7 +473,7 @@ contract University {
     delete students[student].bids;
   }
 
-  function closeBidding() public onlyAdmin() {
+  function closeBidding() public onlyAdmin {
     require(
       block.timestamp > courses.getBiddingEndTime(),
       'called too early'
