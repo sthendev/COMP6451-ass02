@@ -23,7 +23,7 @@ truffle test
 
 ### Running only prescribed tests
 ```
-truffle test test/test_scnario_*.js
+truffle test test/test_scenario_*.js
 ```
 
 
