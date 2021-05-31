@@ -1,6 +1,8 @@
 # COMP6451 Assignment 2
 ## By Dumidu Thenuwara (z5205998)
 
+This projecte defines smart contracts that can be deployed on the ethereum network to be used as a University enrolment system in which students can bid "Admission Tokens" on courses of their choice to gain acceptance.
+
 ### Install truffle
 ```
 npm install -g truffle
